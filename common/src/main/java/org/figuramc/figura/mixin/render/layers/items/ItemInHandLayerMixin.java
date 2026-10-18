@@ -22,6 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.AbstractSkullBlock;
 import org.figuramc.figura.avatar.Avatar;
 import org.figuramc.figura.avatar.AvatarManager;
+import org.figuramc.figura.compat.PlayerAnimationCompat;
 import org.figuramc.figura.ducks.FiguraItemStackRenderStateExtension;
 import org.figuramc.figura.ducks.SkullBlockRendererAccessor;
 import org.figuramc.figura.lua.api.world.ItemStackAPI;
@@ -44,7 +45,8 @@ public abstract class ItemInHandLayerMixin<S extends ArmedEntityRenderState, M e
         super(renderLayerParent);
     }
 
-    @Inject(method = "submitArmWithItem", at = @At("HEAD"), cancellable = true)
+    // Let PAL's HEAD hook enforce first-person item visibility before any pivot submission.
+    @Inject(method = "submitArmWithItem", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;pushPose()V", ordinal = 0), cancellable = true)
     protected void renderArmWithItemInject(S state, ItemStackRenderState itemStackRenderState, ItemStack itemStack, HumanoidArm humanoidArm, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, int light, CallbackInfo ci) {
         av = AvatarManager.getAvatar(state);
 
@@ -61,6 +63,7 @@ public abstract class ItemInHandLayerMixin<S extends ArmedEntityRenderState, M e
             final float s = 16f;
             stack.scale(s, s, s);
             stack.mulPose(Axis.XP.rotationDegrees(-90f));
+            PlayerAnimationCompat.applyItemTransform(state, left, stack);
             // Must do this bs manually
             if (((FiguraItemStackRenderStateExtension)itemStackRenderState).figura$getItemStack().getItem() instanceof BlockItem bl && bl.getBlock() instanceof AbstractSkullBlock) {
                 Entity entity = AvatarManager.getEntity(state);
