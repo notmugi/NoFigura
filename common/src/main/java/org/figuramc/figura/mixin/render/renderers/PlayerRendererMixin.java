@@ -116,7 +116,7 @@ public abstract class PlayerRendererMixin extends LivingEntityRenderer<AbstractC
     @Inject(method = "setupRotations(Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;FF)V", at = @At("HEAD"), cancellable = true)
     private void setupRotations(AvatarRenderState playerRenderState, PoseStack matrices, float f, float g, CallbackInfo cir) {
         Avatar avatar = AvatarManager.getAvatar(playerRenderState);
-        if (RenderUtils.vanillaModelAndScript(avatar) && !avatar.luaRuntime.renderer.getRootRotationAllowed()) {
+        if (RenderUtils.vanillaModelAndScript(avatar) && !avatar.followsVanillaPose() && !avatar.luaRuntime.renderer.getRootRotationAllowed()) {
             cir.cancel();
         }
     }

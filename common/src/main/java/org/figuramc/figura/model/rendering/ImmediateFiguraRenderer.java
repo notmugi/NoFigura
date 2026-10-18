@@ -249,7 +249,48 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         return customization;
     }
 
+    private VanillaPose vanillaPose(FiguraModelPart part) {
+        return avatar.followsVanillaPose() && part.vanillaPosePart && !currentFilterScheme.parentType.isSeparate
+                ? new VanillaPose(part) : null;
+    }
+
+    // Temporary pose only: Lua/animation state remains intact when the toggle is turned off.
+    private static final class VanillaPose implements AutoCloseable {
+        private final FiguraModelPart part;
+        private final PartCustomization customization;
+        private final PartCustomization playerCustomization;
+        private final ParentType parentType;
+        private final int animationOverride;
+
+        VanillaPose(FiguraModelPart part) {
+            this.part = part;
+            customization = part.customization;
+            playerCustomization = part.playerCustomization;
+            parentType = part.parentType;
+            animationOverride = part.animationOverride;
+            part.customization = part.createVanillaPose();
+            // Keep separate-pass membership consistent with the live sorted-part index.
+            if (!parentType.isSeparate && !part.bindParentType.isSeparate)
+                part.parentType = part.bindParentType;
+            part.animationOverride = 0;
+        }
+
+        @Override
+        public void close() {
+            part.customization = customization;
+            part.playerCustomization = playerCustomization;
+            part.parentType = parentType;
+            part.animationOverride = animationOverride;
+        }
+    }
+
     protected boolean renderPart(FiguraModelPart part, int[] remainingComplexity, boolean prevPredicate) {
+        try (VanillaPose pose = vanillaPose(part)) {
+            return renderPart(part, remainingComplexity, prevPredicate, pose != null);
+        }
+    }
+
+    private boolean renderPart(FiguraModelPart part, int[] remainingComplexity, boolean prevPredicate, boolean followPose) {
         FiguraMod.pushProfiler(part.name);
 
         PartCustomization custom = part.customization;
@@ -281,7 +322,7 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         }
 
         // pre render function
-        if (part.preRender != null) {
+        if (!followPose && part.preRender != null) {
             FiguraMod.popPushProfiler("preRenderFunction");
             avatar.run(part.preRender, avatar.render, tickDelta, avatar.renderMode.name(), part);
         }
@@ -343,7 +384,7 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         }
 
         // mid render function
-        if (part.midRender != null) {
+        if (!followPose && part.midRender != null) {
             FiguraMod.popPushProfiler("midRenderFunction");
             avatar.run(part.midRender, avatar.render, tickDelta, avatar.renderMode.name(), part);
         }
@@ -431,7 +472,7 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         part.resetVanillaTransforms();
 
         // post render function
-        if (part.postRender != null) {
+        if (!followPose && part.postRender != null) {
             FiguraMod.popPushProfiler("postRenderFunction");
             avatar.run(part.postRender, avatar.render, tickDelta, avatar.renderMode.name(), part);
         }
@@ -559,6 +600,12 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
     }
 
     protected void calculatePartMatrices(FiguraModelPart part) {
+        try (VanillaPose pose = vanillaPose(part)) {
+            calculatePartMatricesForPose(part);
+        }
+    }
+
+    private void calculatePartMatricesForPose(FiguraModelPart part) {
         FiguraMod.pushProfiler(part.name);
 
         PartCustomization custom = part.customization;

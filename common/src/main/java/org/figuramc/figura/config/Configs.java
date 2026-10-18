@@ -139,6 +139,7 @@ public class Configs {
                         FiguraText.of(tooltip + ".groups").setStyle(ColorUtils.Colors.FIGURA_BLUE.style));
             }};
     public static final ConfigType.BoolConfig
+            FOLLOW_VANILLA_POSE = new ConfigType.BoolConfig("follow_vanilla_pose", RENDERING, false),
             ALLOW_FP_HANDS = new ConfigType.BoolConfig("allow_fp_hands", RENDERING, false),
             FIRST_PERSON_MATRICES = new ConfigType.BoolConfig("first_person_matrices", RENDERING, true),
             INVENTORY_SCISSOR = new ConfigType.BoolConfig("inventory_scissor", RENDERING, true),

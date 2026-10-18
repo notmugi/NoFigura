@@ -44,9 +44,12 @@ public class FiguraModelPart implements Comparable<FiguraModelPart> {
     public final String name;
     public FiguraModelPart parent;
 
-    public final PartCustomization customization;
+    public PartCustomization customization;
+    private final PartCustomization bindPose = new PartCustomization();
     public PartCustomization savedCustomization;
     public ParentType parentType = ParentType.None;
+    public ParentType bindParentType = ParentType.None;
+    public boolean vanillaPosePart;
     public PartCustomization playerCustomization;
 
     private final Map<String, FiguraModelPart> childCache = new HashMap<>();
@@ -99,9 +102,37 @@ public class FiguraModelPart implements Comparable<FiguraModelPart> {
         this.owner = owner;
         this.name = name;
         this.customization = customization;
+        customization.copyTo(bindPose);
         this.vertices = vertices;
         this.children = children;
         this.formatVersion = formatVersion;
+    }
+
+    // ponytail: classify the imported rig once; recompute if dynamic skeletal reparenting is supported.
+    public void markVanillaPoseParts() {
+        vanillaPosePart = switch (bindParentType) {
+            case Head, Body, LeftArm, RightArm, LeftLeg, RightLeg -> true;
+            default -> children.stream().anyMatch(child -> child.vanillaPosePart);
+        };
+    }
+
+    /** Creates a render-only pose without script or animation transforms. */
+    public PartCustomization createVanillaPose() {
+        PartCustomization pose = new PartCustomization();
+        customization.copyTo(pose);
+        pose.setPos(bindPose.getPos());
+        pose.setRot(bindPose.getRot());
+        pose.setScale(bindPose.getScale());
+        pose.setPivot(bindPose.getPivot());
+        pose.offsetPos(bindPose.getOffsetPos());
+        pose.offsetRot(bindPose.getOffsetRot());
+        pose.offsetScale(bindPose.getOffsetScale());
+        pose.offsetPivot(bindPose.getOffsetPivot());
+        pose.setAnimPos(0, 0, 0);
+        pose.setAnimRot(0, 0, 0);
+        pose.setAnimScale(1, 1, 1);
+        pose.needsMatrixRecalculation = true;
+        return pose;
     }
 
     public boolean pushVerticesImmediate(ImmediateFiguraRenderer avatarRenderer, int[] remainingComplexity) {
@@ -1526,6 +1557,9 @@ public class FiguraModelPart implements Comparable<FiguraModelPart> {
         result.facesByTexture = new ArrayList<>(facesByTexture);
         result.textures = new ArrayList<>(textures);
         result.parentType = parentType;
+        bindPose.copyTo(result.bindPose);
+        result.bindParentType = bindParentType;
+        result.vanillaPosePart = vanillaPosePart;
         result.textureHeight = textureHeight;
         result.textureWidth = textureWidth;
 

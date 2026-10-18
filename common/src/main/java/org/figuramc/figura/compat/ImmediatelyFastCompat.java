@@ -11,7 +11,8 @@ public class ImmediatelyFastCompat {
         if (PlatformUtils.isModLoaded("immediatelyfast")) {
             String modVersion = PlatformUtils.getModVersion("immediatelyfast");
             if (PlatformUtils.compareVersionTo(modVersion, "1.2.0") >= 0) {
-                return net.raphimc.immediatelyfast.ImmediatelyFast.config.getBoolean("font_atlas_resizing", false) ? 2048.0f : 256.0f;
+                return ImmediatelyFast.runtimeConfig.getBoolean("font_atlas_resizing", false)
+                        ? ImmediatelyFast.config.getInt("font_atlas_size", 2048) : 256.0f;
             }
             else if (PlatformUtils.compareVersionTo(modVersion, "1.1.17") >= 0){
                 try {

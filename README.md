@@ -1,3 +1,32 @@
+# NoFigura — Minecraft 26.2 compatibility fork
+
+Fork of [Stranik2504/NoFigura](https://github.com/Stranik2504/NoFigura), based on `160fbf8b`.
+
+This branch includes:
+- Client-thread renderer reloads to prevent the avatar-loading crash with Voxy.
+- ImmediatelyFast font-atlas size/runtime-state compatibility fixes.
+- Restored vanilla view bobbing and damage shake.
+- **Settings → Rendering → Follow Vanilla Player Pose**: an optional, local-only toggle that uses the modded player pose instead of avatar body animations, while preserving accessory animations and physics callbacks (hair, tails, ears, etc.). Defaults off.
+
+The pose toggle supports the six standard player bones and their ancestor groups. Arbitrary runtime skeletal reparenting and extra resource-pack bones are not retargeted. Physics on the main body bones remains overridden. Other clients still see the original avatar animations.
+
+## Build and checks
+
+Requires Java 25. Set `JAVA_HOME` to your JDK, then:
+
+```sh
+mkdir -p .build-tmp
+TMPDIR="$PWD/.build-tmp" ./gradlew -Djava.io.tmpdir="$PWD/.build-tmp" :fabric:build -Pmod_version=0.1.6.6-local.5
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_compat.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_vanilla_pose.py
+```
+
+Install `fabric/build/libs/nofigura-0.1.6.6-local.5+26.2-fabric-mc.jar` in place of the original NoFigura jar, then restart Minecraft. The pose toggle itself can be changed without restarting.
+
+Build and isolated regression checks pass; full in-game/resource-pack compatibility is not established. The upstream ImmediatelyFast conflict warning is retained and does not prevent launching.
+
+---
+
 <h1 align="center"> Figura </h1>
 <p align="center">
   <img alt="fabric" height="56" src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/supported/fabric_vector.svg">

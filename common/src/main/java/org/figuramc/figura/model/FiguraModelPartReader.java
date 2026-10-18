@@ -126,6 +126,10 @@ public class FiguraModelPartReader {
             }
         }
 
+        result.bindParentType = result.parentType;
+        // Children are already read: constrain the body rig, not accessory/physics branches.
+        result.markVanillaPoseParts();
+
         // Read animations :D
         if (partCompound.contains("anim")) {
             ListTag nbt = partCompound.getListOrEmpty("anim");

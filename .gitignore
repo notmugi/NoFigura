@@ -47,3 +47,10 @@ forge*changelog.txt
 
 # Used for testing against other mods
 libs/*
+
+# Local builds, instance backups, and regression-test scratch files
+/.build-tmp/
+/build-local*.log
+/local-backups/
+/LOCAL-FIX.md
+/tests/.work/

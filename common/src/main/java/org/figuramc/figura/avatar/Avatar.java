@@ -243,7 +243,12 @@ public class Avatar {
             }
 
             loaded = true;
-            Minecraft.getInstance().levelExtractor.allChanged();
+            // Avatar loading can finish on a worker; renderer reloads require the GL thread.
+            Minecraft minecraft = Minecraft.getInstance();
+            minecraft.execute(() -> {
+                if (minecraft.level != null)
+                    minecraft.levelExtractor.allChanged();
+            });
         });
     }
 
@@ -521,6 +526,20 @@ public class Avatar {
 
     // -- rendering events -- //
 
+    public boolean followsVanillaPose() {
+        return isHost && Configs.FOLLOW_VANILLA_POSE.value;
+    }
+
+    private PoseStack playerPoseStack(EntityModel<?> model, PoseStack stack) {
+        if (!followsVanillaPose() || !(model instanceof PlayerModel))
+            return stack;
+        // Resource packs may animate the player root as well as the six limbs.
+        PoseStack posed = new PoseStack();
+        posed.last().set(stack.last());
+        model.root().translateAndRotate(posed);
+        return posed;
+    }
+
     private void render() {
         if (renderMode == EntityRenderMode.RENDER || renderMode == EntityRenderMode.FIRST_PERSON) {
             complexity.use(renderer.render());
@@ -542,7 +561,8 @@ public class Avatar {
         renderer.entity = entity;
 
         renderer.setupRenderer(
-            filter, collector, stack,
+            filter, collector, (filter == PartFilterScheme.MODEL || filter == PartFilterScheme.PIVOTS)
+                    ? playerPoseStack(entityModel, stack) : stack,
             delta, light, alpha, overlay,
             translucent, glowing, outlineColor
         );
@@ -655,7 +675,7 @@ public class Avatar {
         FiguraMod.pushProfiler(lefty ? "leftArm" : "rightArm");
 
         PartFilterScheme filter = lefty ? PartFilterScheme.LEFT_ARM : PartFilterScheme.RIGHT_ARM;
-        boolean config = Configs.ALLOW_FP_HANDS.value;
+        boolean config = Configs.ALLOW_FP_HANDS.value || followsVanillaPose();
         renderer.allowHiddenTransforms = config;
         renderer.allowMatrixUpdate = false;
         renderer.ignoreVanillaVisibility = true;
@@ -1006,7 +1026,7 @@ public class Avatar {
 
         renderer.vanillaModelData.update(entityModel);
         renderer.currentFilterScheme = PartFilterScheme.MODEL;
-        renderer.setMatrices(stack);
+        renderer.setMatrices(playerPoseStack(entityModel, stack));
         renderer.updateMatrices();
 
         FiguraMod.popProfiler(3);

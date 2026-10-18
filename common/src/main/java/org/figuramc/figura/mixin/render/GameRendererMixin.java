@@ -1,10 +1,7 @@
 package org.figuramc.figura.mixin.render;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.resource.CrossFrameResourcePool;
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -119,25 +116,6 @@ public abstract class GameRendererMixin implements GameRendererAccessor {
         newList.add(new FiguraPortraitRenderer());
         return newList;
     }
-
-    @WrapOperation(method = "renderLevel",
-            at = @At(value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/GameRenderer;bobHurt(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;)V"))
-    private void figura$stopBobView(GameRenderer instance, CameraRenderState cameraRenderState, PoseStack stack, Operation<GameRenderer> original) {
-        Avatar avatar = AvatarManager.getAvatar(this.minecraft.getCameraEntity() == null ? this.minecraft.player : this.minecraft.getCameraEntity());
-        if (!RenderUtils.vanillaModelAndScript(avatar) || hasShaders)
-            original.call(instance, cameraRenderState, stack);
-    }
-
-    @WrapOperation(method = "renderLevel",
-            at = @At(value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/GameRenderer;bobView(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;)V"))
-    private void figura$stopBobHurt(GameRenderer instance, CameraRenderState cameraRenderState, PoseStack stack, Operation<GameRenderer> original) {
-        Avatar avatar = AvatarManager.getAvatar(this.minecraft.getCameraEntity() == null ? this.minecraft.player : this.minecraft.getCameraEntity());
-        if (!RenderUtils.vanillaModelAndScript(avatar) || hasShaders)
-            original.call(instance, cameraRenderState, stack);
-    }
-
 
     @ModifyExpressionValue(method = "renderLevel",
             at = @At(value = "FIELD",
