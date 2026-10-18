@@ -50,6 +50,12 @@ def main():
     for key in ("figura.config.follow_vanilla_pose", "figura.config.follow_vanilla_pose.tooltip"):
         assert isinstance(lang.get(key), str) and lang[key].strip(), f"Missing label: {key}"
 
+    # No name/owner-based filtering is allowed in the shared clip player.
+    player = (SOURCE / "animation/AnimationPlayer.java").read_text()
+    assert "allowsVanillaPoseAnimation" not in player
+    assert "VANILLA_POSE_ACTIONS" not in config
+    assert "vanilla_pose_actions" not in str(lang)
+
     # Keep real fields, setters/getters and copyTo: a fake copy implementation
     # could hide the very live-state aliasing regression this check targets.
     customization = custom[custom.index("public class PartCustomization"):
@@ -165,7 +171,7 @@ class Renderer {
         VanillaPoseCheck.require((part.customization != live) == expectedFollow, "scope selection");
         if (expectedFollow) {
             VanillaPoseCheck.pose(part.customization, live);
-            VanillaPoseCheck.require(part.parentType == ParentType.Head && part.animationOverride == 0,
+            VanillaPoseCheck.require(part.parentType == ParentType.Head && part.animationOverride == 7,
                                      "temporary parent / animation override");
             // Emulate vanilla rendering overwriting its scratch customization.
             part.playerCustomization = new PartCustomization();
@@ -210,10 +216,7 @@ public class VanillaPoseCheck {
     }
     static void pose(PartCustomization p, PartCustomization live) {
         transforms(p, 2);
-        for (FiguraVec3 v : List.of(p.getAnimPos(), p.getAnimRot()))
-            require(v.x == 0 && v.y == 0 && v.z == 0, "animation position/rotation not cleared");
-        FiguraVec3 scale = p.getAnimScale();
-        require(scale.x == 1 && scale.y == 1 && scale.z == 1, "animation scale not reset");
+        equal(p.getAnimPos(), 3); equal(p.getAnimRot(), 6); equal(p.getAnimScale(), 9);
         appearance(p, live);
         require(p.needsMatrixRecalculation, "stale transform matrix");
     }
@@ -301,7 +304,7 @@ public class VanillaPoseCheck {
             part.parentType = pair[0]; part.bindParentType = pair[1];
             renderer.checkSeparateParent(part);
         }
-        System.out.println("PASS: bind transforms, appearance, cleared animation, live-state isolation; " +
+        System.out.println("PASS: bind transforms, appearance, animation passthrough, live-state isolation; " +
             "both scopes restore on success/exception; host/toggle/separate bypass; pre/mid/post callback gates");
     }
 }

@@ -129,6 +129,41 @@ public class Avatar {
     public final Map<String, SoundBuffer> customSounds = new HashMap<>();
     public final Map<Integer, Animation> animations = new HashMap<>();
 
+    // Scoped to action-wheel callbacks and their queued pings, never ordinary tick/render events.
+    public boolean actionWheelCallback;
+
+    public void runActionWheel(Runnable callback) {
+        boolean previous = actionWheelCallback;
+        actionWheelCallback = true;
+        try {
+            callback.run();
+        } finally {
+            actionWheelCallback = previous;
+        }
+    }
+
+    private record WheelPing(int id, byte[] data) {}
+    private final java.util.ArrayDeque<WheelPing> wheelPings = new java.util.ArrayDeque<>();
+
+    public synchronized void markActionWheelPing(int id, byte[] data) {
+        // ponytail: bound missing server echoes; oldest provenance expires after 128 pending pings.
+        if (wheelPings.size() >= 128)
+            wheelPings.removeFirst();
+        wheelPings.addLast(new WheelPing(id, data.clone()));
+    }
+
+    private synchronized boolean consumeActionWheelPing(int id, byte[] data) {
+        var iterator = wheelPings.iterator();
+        while (iterator.hasNext()) {
+            WheelPing ping = iterator.next();
+            if (ping.id == id && java.util.Arrays.equals(ping.data, data)) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
     // runtime status
     public boolean hasTexture, scriptError;
     public Component errorText;
@@ -314,6 +349,7 @@ public class Avatar {
     }
 
     public void runPing(int id, byte[] data) {
+        boolean fromWheel = actionWheelCallback || consumeActionWheelPing(id, data);
         events.offer(() -> {
             if (scriptError || luaRuntime == null || !loaded)
                 return;
@@ -325,7 +361,10 @@ public class Avatar {
                 return;
 
             FiguraLuaPrinter.sendPingMessage(this, name, data.length, args);
-            luaRuntime.run(function.func, tick, (Object[]) args);
+            if (fromWheel)
+                runActionWheel(() -> luaRuntime.run(function.func, tick, (Object[]) args));
+            else
+                luaRuntime.run(function.func, tick, (Object[]) args);
         });
     }
 

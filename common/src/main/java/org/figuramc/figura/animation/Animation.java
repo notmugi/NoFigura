@@ -37,6 +37,11 @@ public class Animation {
 
     private final TimeController controller = new TimeController();
     public PlayState playState = PlayState.STOPPED;
+    private boolean actionWheelPlayback;
+
+    public boolean allowsBodyPose() {
+        return !owner.followsVanillaPose() || (actionWheelPlayback && blend != 0);
+    }
     private float time = 0f;
     private boolean inverted = false;
     private float lastTime = 0f;
@@ -51,7 +56,7 @@ public class Animation {
     protected int priority = 0;
     protected LoopMode loop;
 
-    // -- java methods -- // 
+    // -- java methods -- //
 
     public Animation(Avatar owner, String modelName, String name, LoopMode loop, boolean override, float length, float offset, float blend, float startDelay, float loopDelay) {
         this.owner = owner;
@@ -203,6 +208,8 @@ public class Animation {
     @LuaWhitelist
     @LuaMethodDoc("animation.play")
     public Animation play() {
+        if (owner.actionWheelCallback)
+            actionWheelPlayback = true;
         switch (playState) {
             case PAUSED -> controller.resume();
             case STOPPED -> {
@@ -229,6 +236,7 @@ public class Animation {
     @LuaWhitelist
     @LuaMethodDoc("animation.stop")
     public Animation stop() {
+        actionWheelPlayback = false;
         controller.reset();
         playState = PlayState.STOPPED;
         return this;

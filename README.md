@@ -6,9 +6,17 @@ This branch includes:
 - Client-thread renderer reloads to prevent the avatar-loading crash with Voxy.
 - ImmediatelyFast font-atlas size/runtime-state compatibility fixes.
 - Restored vanilla view bobbing and damage shake.
-- **Settings → Rendering → Follow Vanilla Player Pose**: an optional, local-only toggle that uses the modded player pose instead of avatar body animations, while preserving accessory animations and physics callbacks (hair, tails, ears, etc.). Defaults off.
+- **Settings → Rendering → Follow Vanilla Player Pose**: an optional, local-only toggle that uses the modded player pose as a base while allowing radial-menu animation clips through and preserving accessory animations and physics callbacks (hair, tails, ears, etc.). Defaults off.
 
 The pose toggle supports the six standard player bones and their ancestor groups. Arbitrary runtime skeletal reparenting and extra resource-pack bones are not retargeted. Physics on the main body bones remains overridden. Other clients still see the original avatar animations.
+
+## Radial-menu animation passthrough
+
+In **Follow Vanilla Player Pose** mode, only animation clips started by action-wheel buttons/toggles/scroll callbacks (including their queued pings) can animate the body. Ordinary tick/render-driven clips, including Figura locomotion, are excluded. No animation names or avatar-specific lists.
+
+Approved playback keeps its authored priorities, blend and additive/override flags until stopped; paused/held poses remain approved until released. Stopping clears approval, so an ordinary script restart is blocked again. Accessory physics remains active. With vanilla-pose mode off, normal Figura behavior is unchanged.
+
+Limits: arbitrary Lua body transforms remain masked. A callback that merely sets a variable and starts an animation later in an unrelated tick/timer cannot be attributed automatically and stays blocked. Synced ping echoes are matched by ID and payload with a bounded pending queue; the protocol has no unique invocation ID. Test your avatar's action wheel in-game.
 
 ## Build and checks
 
@@ -16,12 +24,13 @@ Requires Java 25. Set `JAVA_HOME` to your JDK, then:
 
 ```sh
 mkdir -p .build-tmp
-TMPDIR="$PWD/.build-tmp" ./gradlew -Djava.io.tmpdir="$PWD/.build-tmp" :fabric:build -Pmod_version=0.1.6.6-local.5
+TMPDIR="$PWD/.build-tmp" ./gradlew -Djava.io.tmpdir="$PWD/.build-tmp" :fabric:build -Pmod_version=0.1.6.6-local.8
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_compat.py
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_vanilla_pose.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_wheel_animations.py
 ```
 
-Install `fabric/build/libs/nofigura-0.1.6.6-local.5+26.2-fabric-mc.jar` in place of the original NoFigura jar, then restart Minecraft. The pose toggle itself can be changed without restarting.
+Install `fabric/build/libs/nofigura-0.1.6.6-local.8+26.2-fabric-mc.jar` in place of the original NoFigura jar, then restart Minecraft. The pose toggle itself can be changed without restarting.
 
 Build and isolated regression checks pass; full in-game/resource-pack compatibility is not established. The upstream ImmediatelyFast conflict warning is retained and does not prevent launching.
 

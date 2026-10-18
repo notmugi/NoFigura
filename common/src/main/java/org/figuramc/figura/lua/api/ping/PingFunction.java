@@ -60,6 +60,8 @@ public class PingFunction extends LuaFunction {
         boolean sync = Configs.SYNC_PINGS.value;
         byte[] data = new PingArg(args).toByteArray();
 
+        if (sync && owner.actionWheelCallback && org.figuramc.figura.avatar.AvatarManager.localUploaded && NetworkStuff.isConnected())
+            owner.markActionWheelPing(id, data);
         NetworkStuff.sendPing(id, sync, data);
         if (!sync) owner.runPing(id, data);
 

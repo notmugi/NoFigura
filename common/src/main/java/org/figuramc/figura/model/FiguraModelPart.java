@@ -116,7 +116,7 @@ public class FiguraModelPart implements Comparable<FiguraModelPart> {
         };
     }
 
-    /** Creates a render-only pose without script or animation transforms. */
+    /** Creates a render-only bind pose plus avatar animation channels, without scripted body transforms. */
     public PartCustomization createVanillaPose() {
         PartCustomization pose = new PartCustomization();
         customization.copyTo(pose);
@@ -128,9 +128,13 @@ public class FiguraModelPart implements Comparable<FiguraModelPart> {
         pose.offsetRot(bindPose.getOffsetRot());
         pose.offsetScale(bindPose.getOffsetScale());
         pose.offsetPivot(bindPose.getOffsetPivot());
-        pose.setAnimPos(0, 0, 0);
-        pose.setAnimRot(0, 0, 0);
-        pose.setAnimScale(1, 1, 1);
+        // Preserve action-wheel channels admitted by AnimationPlayer, with their authored override behavior.
+        FiguraVec3 animPos = customization.getAnimPos();
+        FiguraVec3 animRot = customization.getAnimRot();
+        FiguraVec3 animScale = customization.getAnimScale();
+        pose.setAnimPos(animPos.x, animPos.y, animPos.z);
+        pose.setAnimRot(animRot.x, animRot.y, animRot.z);
+        pose.setAnimScale(animScale.x, animScale.y, animScale.z);
         pose.needsMatrixRecalculation = true;
         return pose;
     }

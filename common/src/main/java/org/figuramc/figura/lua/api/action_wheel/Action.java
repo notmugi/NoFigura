@@ -58,6 +58,10 @@ public class Action {
 
 
     public void execute(Avatar avatar, boolean left) {
+        avatar.runActionWheel(() -> executeCallback(avatar, left));
+    }
+
+    private void executeCallback(Avatar avatar, boolean left) {
         // click action
         LuaFunction function = left ? leftClick : rightClick;
         if (function != null)
@@ -77,7 +81,7 @@ public class Action {
     public void mouseScroll(Avatar avatar, double delta) {
         // scroll action
         if (scroll != null)
-            avatar.run(scroll, avatar.tick, delta, this);
+            avatar.runActionWheel(() -> avatar.run(scroll, avatar.tick, delta, this));
     }
 
     public ItemStack getItem(boolean selected) {

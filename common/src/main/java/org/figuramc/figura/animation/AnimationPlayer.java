@@ -19,9 +19,12 @@ public class AnimationPlayer {
         if (anim.playState != Animation.PlayState.PAUSED)
             anim.tick();
 
+        boolean allowBody = anim.allowsBodyPose();
         for (Map.Entry<FiguraModelPart, List<Animation.AnimationChannel>> entry : anim.animationParts) {
             FiguraModelPart part = entry.getKey();
 
+            if (part.vanillaPosePart && !allowBody)
+                continue;
             if (part.lastAnimationPriority > anim.priority)
                 continue;
 

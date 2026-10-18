@@ -272,7 +272,7 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
             // Keep separate-pass membership consistent with the live sorted-part index.
             if (!parentType.isSeparate && !part.bindParentType.isSeparate)
                 part.parentType = part.bindParentType;
-            part.animationOverride = 0;
+            // Animation clips retain their authored additive/override behavior per channel.
         }
 
         @Override
