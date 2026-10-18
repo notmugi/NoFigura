@@ -250,8 +250,8 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
     }
 
     private VanillaPose vanillaPose(FiguraModelPart part) {
-        return avatar.followsVanillaPose() && part.vanillaPosePart && !currentFilterScheme.parentType.isSeparate
-                ? new VanillaPose(part) : null;
+        return (avatar.followsVanillaPose() || avatar.combatPose) && part.vanillaPosePart && !currentFilterScheme.parentType.isSeparate
+                ? new VanillaPose(part, avatar.combatPose) : null;
     }
 
     // Temporary pose only: Lua/animation state remains intact when the toggle is turned off.
@@ -263,6 +263,10 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         private final int animationOverride;
 
         VanillaPose(FiguraModelPart part) {
+            this(part, false);
+        }
+
+        VanillaPose(FiguraModelPart part, boolean combat) {
             this.part = part;
             customization = part.customization;
             playerCustomization = part.playerCustomization;
@@ -272,7 +276,13 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
             // Keep separate-pass membership consistent with the live sorted-part index.
             if (!parentType.isSeparate && !part.bindParentType.isSeparate)
                 part.parentType = part.bindParentType;
-            // Animation clips retain their authored additive/override behavior per channel.
+            // Combat must not inherit the override bit/idle channels that mask vanilla arms.
+            if (combat) {
+                part.customization.setAnimPos(0, 0, 0);
+                part.customization.setAnimRot(0, 0, 0);
+                part.customization.setAnimScale(1, 1, 1);
+                part.animationOverride = 0;
+            }
         }
 
         @Override
@@ -298,6 +308,13 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
         // test the current filter scheme
         FiguraMod.pushProfiler("predicate");
         Boolean thisPassedPredicate = currentFilterScheme.test(part.parentType, prevPredicate);
+        // Hide PAL's first-person body geometry, but keep traversing nested arm rigs.
+        if (avatar.combatFirstPerson && thisPassedPredicate != null)
+            thisPassedPredicate = switch (part.bindParentType) {
+                case LeftArm, RightArm -> true;
+                case Head, Body, LeftLeg, RightLeg -> false;
+                default -> prevPredicate && thisPassedPredicate;
+            };
         if (thisPassedPredicate == null || (!custom.visible)) {
             if (part.parentType.isRenderLayer)
                 part.savedCustomization = customizationStack.peek();
@@ -314,7 +331,8 @@ public class ImmediateFiguraRenderer extends FiguraRenderer {
 
         // visibility
         FiguraMod.popPushProfiler("checkVanillaVisible");
-        if (!ignoreVanillaVisibility && custom.vanillaVisible != null && !custom.vanillaVisible) {
+        if (!(avatar.combatFirstPerson && !thisPassedPredicate)
+                && !ignoreVanillaVisibility && custom.vanillaVisible != null && !custom.vanillaVisible) {
             FiguraMod.popPushProfiler("removeVanillaTransforms");
             part.resetVanillaTransforms();
             FiguraMod.popProfiler(2);

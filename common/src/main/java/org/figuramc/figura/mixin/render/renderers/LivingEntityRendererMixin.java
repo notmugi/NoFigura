@@ -24,6 +24,7 @@ import org.figuramc.figura.FiguraMod;
 import org.figuramc.figura.avatar.Avatar;
 import org.figuramc.figura.avatar.AvatarManager;
 import org.figuramc.figura.config.Configs;
+import org.figuramc.figura.compat.PlayerAnimationCompat;
 import org.figuramc.figura.ducks.FiguraEntityRenderStateExtension;
 import org.figuramc.figura.ducks.FiguraSubmitCallBackExtension;
 import org.figuramc.figura.ducks.LivingEntityRendererAccessor;
@@ -179,9 +180,22 @@ public abstract class LivingEntityRendererMixin<T extends LivingEntity, S extend
             part.visible = true;
     }
 
-    // Run after setupAnim's AFTER hooks too (EMF evaluates its player animations there).
-    @Inject(at = @At(value = "INVOKE", target = "Ljava/util/List;iterator()Ljava/util/Iterator;", ordinal = 0), method = "submit(Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V", cancellable = true)
+    // Preserve upstream timing unless this avatar explicitly follows the modded player pose.
+    @Inject(at = @At(value = "INVOKE", target = "Lnet/minecraft/client/model/EntityModel;setupAnim(Ljava/lang/Object;)V", shift = At.Shift.AFTER), method = "submit(Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V", cancellable = true)
     private void submitFiguraModel(S livingEntityRenderState, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState cameraRenderState, CallbackInfo ci) {
+        if (currentAvatar != null && !currentAvatar.followsVanillaPose())
+            figura$submitModel(livingEntityRenderState, poseStack, submitNodeCollector, cameraRenderState, ci);
+    }
+
+    // EMF evaluates its animations in setupAnim's AFTER hooks.
+    @Inject(at = @At(value = "INVOKE", target = "Ljava/util/List;iterator()Ljava/util/Iterator;", ordinal = 0), method = "submit(Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V", cancellable = true)
+    private void submitFollowingFiguraModel(S livingEntityRenderState, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState cameraRenderState, CallbackInfo ci) {
+        if (currentAvatar != null && currentAvatar.followsVanillaPose())
+            figura$submitModel(livingEntityRenderState, poseStack, submitNodeCollector, cameraRenderState, ci);
+    }
+
+    @Unique
+    private void figura$submitModel(S livingEntityRenderState, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState cameraRenderState, CallbackInfo ci) {
         if (currentAvatar == null)
             return;
 
@@ -213,48 +227,57 @@ public abstract class LivingEntityRendererMixin<T extends LivingEntity, S extend
         int overlay = getOverlayCoords(livingEntityRenderState, getWhiteOverlayProgress(livingEntityRenderState));
 
         Entity entity = Minecraft.getInstance().level.getEntity(entityId);
-        // actually do the render here
+        boolean previousCombat = localAvatar.combatPose;
+        boolean previousFirstPerson = localAvatar.combatFirstPerson;
+        localAvatar.combatPose = PlayerAnimationCompat.isAttackingEntity(entity);
+        localAvatar.combatFirstPerson = PlayerAnimationCompat.isFirstPersonPass(livingEntityRenderState);
+        try {
+            // actually do the render here
 
-        var modelState = RenderUtils.captureModelState(model);
-        RenderUtils.restoreModelPoseState(model, modelState);
+            var modelState = RenderUtils.captureModelState(model);
+            RenderUtils.restoreModelPoseState(model, modelState);
 
-        PartFilterScheme filter = invisible ? PartFilterScheme.PIVOTS : PartFilterScheme.MODEL;
+            PartFilterScheme filter = invisible ? PartFilterScheme.PIVOTS : PartFilterScheme.MODEL;
 
-        Matrix4f lastPs = new Matrix4f(lastPose);
-        PoseStack poseStack2 = new PoseStack();
-        poseStack2.pushPose();
-        poseStack2.last().set(poseStack.last());
+            Matrix4f lastPs = new Matrix4f(lastPose);
+            PoseStack poseStack2 = new PoseStack();
+            poseStack2.pushPose();
+            poseStack2.last().set(poseStack.last());
 
-        FiguraMod.pushProfiler(FiguraMod.MOD_ID);
-        FiguraMod.pushProfiler(localAvatar);
+            FiguraMod.pushProfiler(FiguraMod.MOD_ID);
+            FiguraMod.pushProfiler(localAvatar);
 
-        FiguraMod.pushProfiler("calculateMatrix");
-        Matrix4f diff = new Matrix4f(lastPs).invert().mul(poseStack2.last().pose());
-        FiguraMat4 poseMatrix = new FiguraMat4().set(diff);
+            FiguraMod.pushProfiler("calculateMatrix");
+            Matrix4f diff = new Matrix4f(lastPs).invert().mul(poseStack2.last().pose());
+            FiguraMat4 poseMatrix = new FiguraMat4().set(diff);
 
-        FiguraMod.popPushProfiler("render");
-        figura$transformParts(localAvatar, model);
+            FiguraMod.popPushProfiler("render");
+            figura$transformParts(localAvatar, model);
 
-        FiguraMod.popPushProfiler("renderEvent");
-        localAvatar.renderEvent(tickDelta, poseMatrix);
+            FiguraMod.popPushProfiler("renderEvent");
+            localAvatar.renderEvent(tickDelta, poseMatrix);
 
-        int outlineColor = 0;
-        if (glowing) {
-            outlineColor = (RenderUtils.vanillaModelAndScript(localAvatar) && localAvatar.luaRuntime.renderer.outlineColor != null)
-                    ? ColorUtils.rgbToInt(localAvatar.luaRuntime.renderer.outlineColor)
-                    : livingEntityRenderState.outlineColor;
+            int outlineColor = 0;
+            if (glowing) {
+                outlineColor = (RenderUtils.vanillaModelAndScript(localAvatar) && localAvatar.luaRuntime.renderer.outlineColor != null)
+                        ? ColorUtils.rgbToInt(localAvatar.luaRuntime.renderer.outlineColor)
+                        : livingEntityRenderState.outlineColor;
+            }
+
+            localAvatar.render(entity, livingEntityRenderState.yRot, tickDelta, translucent ? 0.15f : 1f,
+                    poseStack2, submitNodeCollector, livingEntityRenderState.lightCoords, overlay, model, filter, translucent, glowing, outlineColor);
+
+
+            FiguraMod.popPushProfiler("postRenderEvent");
+            localAvatar.postRenderEvent(tickDelta, poseMatrix);
+            FiguraMod.popProfiler(3);
+
+            if (localAvatar.luaRuntime != null)
+                localAvatar.luaRuntime.vanilla_model.PLAYER.restore(model);
+        } finally {
+            localAvatar.combatPose = previousCombat;
+            localAvatar.combatFirstPerson = previousFirstPerson;
         }
-
-        localAvatar.render(entity, livingEntityRenderState.yRot, tickDelta, translucent ? 0.15f : 1f,
-                poseStack2, submitNodeCollector, livingEntityRenderState.lightCoords, overlay, model, filter, translucent, glowing, outlineColor);
-
-
-        FiguraMod.popPushProfiler("postRenderEvent");
-        localAvatar.postRenderEvent(tickDelta, poseMatrix);
-        FiguraMod.popProfiler(3);
-
-        if (localAvatar.luaRuntime != null)
-            localAvatar.luaRuntime.vanilla_model.PLAYER.restore(model);
     }
 
     @Inject(at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;popPose()V"), method = "submit(Lnet/minecraft/client/renderer/entity/state/LivingEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V")

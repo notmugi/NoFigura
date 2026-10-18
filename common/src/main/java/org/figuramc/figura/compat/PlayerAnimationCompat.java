@@ -37,6 +37,82 @@ public final class PlayerAnimationCompat {
         }
     }
 
+    private static final class EntityAccess {
+        static Class<?> type;
+        static Method manager;
+        static {
+            try {
+                type = Class.forName("com.zigythebird.playeranim.accessors.IAnimatedAvatar");
+                manager = type.getMethod("playerAnimLib$getAnimManager");
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                type = null;
+            }
+        }
+    }
+
+    public static boolean isAnimatingEntity(Object entity) {
+        if (!available || EntityAccess.type == null || !EntityAccess.type.isInstance(entity))
+            return false;
+        try {
+            Object manager = EntityAccess.manager.invoke(entity);
+            return manager != null && Boolean.TRUE.equals(isActive.invoke(manager));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            EntityAccess.type = null;
+            FiguraMod.LOGGER.warn("Disabling PAL entity animation detection after an error", e);
+            return false;
+        }
+    }
+
+    private static final class CombatAccess {
+        static Method layer, active;
+        static Object attack;
+        static {
+            try {
+                Class<?> access = Class.forName("com.zigythebird.playeranim.api.PlayerAnimationAccess");
+                layer = access.getMethod("getPlayerAnimationLayer", net.minecraft.world.entity.Avatar.class,
+                        net.minecraft.resources.Identifier.class);
+                active = Class.forName("com.zigythebird.playeranimcore.animation.layered.IAnimation").getMethod("isActive");
+                attack = net.minecraft.resources.Identifier.fromNamespaceAndPath("bettercombat", "attack");
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                layer = null;
+            }
+        }
+    }
+
+    public static boolean isAttackingEntity(Object entity) {
+        if (!(entity instanceof net.minecraft.world.entity.Avatar) || CombatAccess.layer == null)
+            return false;
+        try {
+            Object attack = CombatAccess.layer.invoke(null, entity, CombatAccess.attack);
+            return attack != null && Boolean.TRUE.equals(CombatAccess.active.invoke(attack));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            CombatAccess.layer = null;
+            FiguraMod.LOGGER.warn("Disabling Better Combat pose detection after an error", e);
+            return false;
+        }
+    }
+
+    private static final class FirstPersonAccess {
+        static Method pass;
+        static {
+            try {
+                if (stateType != null) pass = stateType.getMethod("playerAnimLib$isFirstPersonPass");
+            } catch (ReflectiveOperationException ignored) {}
+        }
+    }
+
+    public static boolean isFirstPersonPass(Object state) {
+        if (stateType == null || !stateType.isInstance(state) || FirstPersonAccess.pass == null)
+            return false;
+        try {
+            return Boolean.TRUE.equals(FirstPersonAccess.pass.invoke(state));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            FirstPersonAccess.pass = null;
+            FiguraMod.LOGGER.warn("Disabling PAL first-person detection after an error", e);
+            return false;
+        }
+    }
+
     public static void applyItemTransform(Object state, boolean left, PoseStack stack) {
         if (!available || !stateType.isInstance(state))
             return;

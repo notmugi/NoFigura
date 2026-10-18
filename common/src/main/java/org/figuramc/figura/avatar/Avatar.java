@@ -131,37 +131,45 @@ public class Avatar {
 
     // Scoped to action-wheel callbacks and their queued pings, never ordinary tick/render events.
     public boolean actionWheelCallback;
+    public org.figuramc.figura.lua.api.action_wheel.Action actionWheelToggle;
 
     public void runActionWheel(Runnable callback) {
+        runActionWheel(actionWheelToggle, callback);
+    }
+
+    public void runActionWheel(org.figuramc.figura.lua.api.action_wheel.Action toggle, Runnable callback) {
         boolean previous = actionWheelCallback;
+        var previousToggle = actionWheelToggle;
         actionWheelCallback = true;
+        actionWheelToggle = toggle;
         try {
             callback.run();
         } finally {
             actionWheelCallback = previous;
+            actionWheelToggle = previousToggle;
         }
     }
 
-    private record WheelPing(int id, byte[] data) {}
+    private record WheelPing(int id, byte[] data, org.figuramc.figura.lua.api.action_wheel.Action toggle) {}
     private final java.util.ArrayDeque<WheelPing> wheelPings = new java.util.ArrayDeque<>();
 
     public synchronized void markActionWheelPing(int id, byte[] data) {
         // ponytail: bound missing server echoes; oldest provenance expires after 128 pending pings.
         if (wheelPings.size() >= 128)
             wheelPings.removeFirst();
-        wheelPings.addLast(new WheelPing(id, data.clone()));
+        wheelPings.addLast(new WheelPing(id, data.clone(), actionWheelToggle));
     }
 
-    private synchronized boolean consumeActionWheelPing(int id, byte[] data) {
+    private synchronized WheelPing consumeActionWheelPing(int id, byte[] data) {
         var iterator = wheelPings.iterator();
         while (iterator.hasNext()) {
             WheelPing ping = iterator.next();
             if (ping.id == id && java.util.Arrays.equals(ping.data, data)) {
                 iterator.remove();
-                return true;
+                return ping;
             }
         }
-        return false;
+        return null;
     }
 
     // runtime status
@@ -349,7 +357,9 @@ public class Avatar {
     }
 
     public void runPing(int id, byte[] data) {
-        boolean fromWheel = actionWheelCallback || consumeActionWheelPing(id, data);
+        WheelPing echo = consumeActionWheelPing(id, data);
+        boolean fromWheel = actionWheelCallback || echo != null;
+        var toggle = actionWheelCallback ? actionWheelToggle : echo == null ? null : echo.toggle;
         events.offer(() -> {
             if (scriptError || luaRuntime == null || !loaded)
                 return;
@@ -362,7 +372,7 @@ public class Avatar {
 
             FiguraLuaPrinter.sendPingMessage(this, name, data.length, args);
             if (fromWheel)
-                runActionWheel(() -> luaRuntime.run(function.func, tick, (Object[]) args));
+                runActionWheel(toggle, () -> luaRuntime.run(function.func, tick, (Object[]) args));
             else
                 luaRuntime.run(function.func, tick, (Object[]) args);
         });
@@ -565,6 +575,9 @@ public class Avatar {
 
     // -- rendering events -- //
 
+    // Render-scoped combat state; never changes the user's locomotion toggle.
+    public boolean combatPose, combatFirstPerson;
+
     public boolean followsVanillaPose() {
         return isHost && Configs.FOLLOW_VANILLA_POSE.value;
     }
@@ -594,6 +607,11 @@ public class Avatar {
     public void render(Entity entity, float yaw, float delta, float alpha, PoseStack stack, SubmitNodeCollector collector, int light, int overlay, EntityModel<?> entityModel, PartFilterScheme filter, boolean translucent, boolean glowing, int outlineColor) {
         if (renderer == null || !loaded)
             return;
+
+        // World-body submissions must refresh physics matrices themselves. Hand/preview
+        // passes disable updates; do not inherit their flag or depend on a preceding WORLD pass.
+        if (renderMode == EntityRenderMode.RENDER)
+            renderer.allowMatrixUpdate = true;
 
         renderer.vanillaModelData.update(entityModel);
         renderer.yaw = yaw;

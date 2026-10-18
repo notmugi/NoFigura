@@ -11,17 +11,29 @@ This branch includes:
 
 The pose toggle supports the six standard player bones and their ancestor groups. Arbitrary runtime skeletal reparenting and extra resource-pack bones are not retargeted. Physics on the main body bones remains overridden. Other clients still see the original avatar animations.
 
+## Pose toggle and EMF player packs
+
+- **OFF:** EMF's per-entity vanilla-model condition excludes the local player from its resource-pack model while a loaded Figura renderer is present. Avatar scripts and locomotion use the normal player base instead. EMF player geometry as well as animation is excluded for that entity; the Figura avatar remains.
+- **ON:** release the vanilla-model condition and follow the resource-pack player pose. While PAL/Better Combat animation is active, pause EMF animation using its current API so it cannot overwrite combat posing. Other EMF conditions may still apply.
+- Other players and mobs are unaffected. Unloading the avatar, leaving the world, or enabling Figura panic mode releases our condition automatically. No global pack/config changes or persistent entity locks.
+
+The OFF condition also pauses EMF animation for cold models before their first variant registration. Normal mode changes take effect on subsequent extraction/submission; already-built submissions are not rewritten. The first cold model may still briefly use its EMF geometry before variant registration. This bridge uses optional EMF APIs checked against 3.3.11 for Minecraft 26.2. It does not disable Better Combat/PAL or any other animation mod. Visual integration is not yet verified.
+
 ## Radial-menu animation passthrough
 
 In **Follow Vanilla Player Pose** mode, only animation clips started by action-wheel buttons/toggles/scroll callbacks (including their queued pings) can animate the body. Ordinary tick/render-driven clips, including Figura locomotion, are excluded. No animation names or avatar-specific lists.
 
-Approved playback keeps its authored priorities, blend and additive/override flags until stopped; paused/held poses remain approved until released. Stopping clears approval, so an ordinary script restart is blocked again. Accessory physics remains active. With vanilla-pose mode off, normal Figura behavior is unchanged.
+Button-triggered playback keeps its authored priorities, blend and additive/override flags until stopped; paused/held poses remain approved until released. Button playback approval clears on stop. Toggle callbacks additionally associate the animation clips they touch (including stopped/conditional clips) with that toggle: later weather/tick starts of those clips are allowed only while the toggle remains enabled. Other clips remain blocked. Accessory physics remains active. With vanilla-pose mode off, Figura uses the upstream post-setupAnim submission hook. Only following avatars use the later post-resource-pack hook. When EMF is installed, OFF also requests its vanilla model variant for your loaded local Figura avatar; ON releases that request.
 
-Limits: arbitrary Lua body transforms remain masked. A callback that merely sets a variable and starts an animation later in an unrelated tick/timer cannot be attributed automatically and stays blocked. Synced ping echoes are matched by ID and payload with a bounded pending queue; the protocol has no unique invocation ID. Test your avatar's action wheel in-game.
+Limits: arbitrary Lua body transforms remain masked. A callback that merely sets a variable without touching an animation cannot be attributed automatically and stays blocked. Saved toggle initialization is recognized automatically when the avatar calls its registered toggle callback directly: no manual off/on or callback replay is needed. Distinct closures are tracked by identity, not source/name. Shared callback objects used by multiple toggles are ambiguous and are not guessed. Synced ping echoes are matched by ID and payload with a bounded pending queue; the protocol has no unique invocation ID. Test your avatar's action wheel in-game.
+
+World-body submissions explicitly enable world-matrix refresh before accessory callbacks, rather than inheriting the flag from a previous hand/preview pass. Headless traversal checks reproduce frozen physics with stale matrices in both modes and verify changing child transforms with refreshed matrices. This is not live-game confirmation of the reported failure.
 
 ## Held-item compatibility
 
 Figura custom hand pivots now include Player Animation Library's animated `left_item`/`right_item` translation, rotation and scale instead of bypassing them. This targets the PAL 1.2.5 API used by Better Combat on Minecraft 26.2, and applies independently of the vanilla-pose toggle. Custom pivots and ordinary no-pivot rendering remain intact. PAL is optional; no additional dependency is required. An incompatible API logs a warning and disables this bridge.
+
+During an active Better Combat attack (not merely holding a weapon), the body rig temporarily follows the combat pose in either toggle mode: Figura idle/walk override channels cannot mask the swing. Avatar animation state is restored afterward; accessory callbacks stay live. PAL first-person submissions hide head/body/leg geometry while still traversing nested arms and item pivots.
 
 The bridge matches the installed PAL item-axis mapping, including its conditional rotations. It does not replace PAL's own first-person selection or retarget spyglass-to-eye rendering. Visual validation in-game is still required.
 
@@ -31,14 +43,18 @@ Requires Java 25. Set `JAVA_HOME` to your JDK, then:
 
 ```sh
 mkdir -p .build-tmp
-TMPDIR="$PWD/.build-tmp" ./gradlew -Djava.io.tmpdir="$PWD/.build-tmp" :fabric:build -Pmod_version=0.1.6.6-local.9
+TMPDIR="$PWD/.build-tmp" ./gradlew -Djava.io.tmpdir="$PWD/.build-tmp" :fabric:build -Pmod_version=0.1.6.6-local.17
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_compat.py
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_vanilla_pose.py
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_wheel_animations.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_toggle_init.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_render_timing.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_emf_compat.py
 JAVA25_HOME="$JAVA_HOME" python3 tests/check_held_item_compat.py
+JAVA25_HOME="$JAVA_HOME" python3 tests/check_physics_matrices.py
 ```
 
-Install `fabric/build/libs/nofigura-0.1.6.6-local.9+26.2-fabric-mc.jar` in place of the original NoFigura jar, then restart Minecraft. The pose toggle itself can be changed without restarting.
+Install `fabric/build/libs/nofigura-0.1.6.6-local.17+26.2-fabric-mc.jar` in place of the original NoFigura jar, then restart Minecraft. The pose toggle itself can be changed without restarting.
 
 Build and isolated regression checks pass; full in-game/resource-pack compatibility is not established. The upstream ImmediatelyFast conflict warning is retained and does not prevent launching.
 

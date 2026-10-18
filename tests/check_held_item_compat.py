@@ -30,38 +30,32 @@ def run(*args):
                           text=True).stdout
 
 
-def main():
-    joml = dependency("JOML_JAR", list((Path.home() / ".gradle/caches/modules-2/files-2.1/org.joml/joml").glob("*/*/*.jar")) +
+accessor = "com.zigythebird.playeranim.accessors.IAvatarAnimationState"
+entity_accessor = "com.zigythebird.playeranim.accessors.IAnimatedAvatar"
+manager = "com.zigythebird.playeranim.animation.AvatarAnimManager"
+stack = "com.zigythebird.playeranimcore.animation.layered.AnimationStack"
+bone = "com.zigythebird.playeranimcore.bones.PlayerAnimBone"
+combat_access = "com.zigythebird.playeranim.api.PlayerAnimationAccess"
+animation = "com.zigythebird.playeranimcore.animation.layered.IAnimation"
+
+
+def joml_dependency():
+    return dependency("JOML_JAR", list((Path.home() / ".gradle/caches/modules-2/files-2.1/org.joml/joml").glob("*/*/*.jar")) +
                       [p for root in PRISM for p in (root / "libraries/org/joml/joml").glob("*/*.jar")])
-    pal = dependency("PAL_JAR", [p for root in PRISM for p in
-                     (root / "instances").glob("*/minecraft/mods/*PlayerAnimation*.jar")])
-    accessor = "com.zigythebird.playeranim.accessors.IAvatarAnimationState"
-    manager = "com.zigythebird.playeranim.animation.AvatarAnimManager"
-    stack = "com.zigythebird.playeranimcore.animation.layered.AnimationStack"
-    bone = "com.zigythebird.playeranimcore.bones.PlayerAnimBone"
-    api = {name: run(JDK / "javap", "-classpath", pal, name)
-           for name in (accessor, manager, stack, bone)}
-    assert f"public abstract {manager} playerAnimLib$getAnimManager();" in api[accessor]
-    assert f"extends {stack}" in api[manager], "Manager inheritance changed"
-    assert "public boolean isActive();" in api[stack]
-    assert f"public void get3DTransform({bone});" in api[stack]
-    assert f"public {bone}(java.lang.String);" in api[bone]
-    for field in ("position", "rotation", "scale"):
-        assert re.search(r"public (?:final )?org\.joml\.Vector3f " + field + ";", api[bone])
-    print(f"PASS: installed PAL reflection API (including inherited methods): {pal.name}")
 
-    work = ROOT / "tests/.work"
-    work.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="held-item-", dir=work) as directory:
-        tmp = Path(directory)
 
-        def java(name, text):
-            path = tmp / "src" / (name.replace(".", "/") + ".java")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-            return path
-
-        stubs = [java("com.mojang.blaze3d.vertex.PoseStack", """
+def game_stubs(java):
+    return [java("net.minecraft.world.entity.Avatar", """
+package net.minecraft.world.entity;
+public class Avatar {}
+"""), java("net.minecraft.resources.Identifier", """
+package net.minecraft.resources;
+public record Identifier(String namespace, String path) {
+    public static Identifier fromNamespaceAndPath(String namespace, String path) {
+        return new Identifier(namespace, path);
+    }
+}
+"""), java("com.mojang.blaze3d.vertex.PoseStack", """
 package com.mojang.blaze3d.vertex;
 import org.joml.*;
 public class PoseStack {
@@ -86,37 +80,19 @@ public class FiguraMod {
     public static final Logger LOGGER = new Logger();
     public static class Logger {
         public int warnings;
+        public Throwable lastError;
         public void warn(String message, Throwable error) {
             if (message.isBlank() || error == null) throw new AssertionError("empty diagnostic");
             warnings++;
+            lastError = error;
         }
     }
 }
 """)]
-        absent = java("AbsentCheck", """
-import com.mojang.blaze3d.vertex.PoseStack;
-import org.figuramc.figura.compat.PlayerAnimationCompat;
-import org.figuramc.figura.FiguraMod;
-import org.joml.Matrix4f;
-public class AbsentCheck {
-    public static void main(String[] args) throws Exception {
-        try {
-            Class.forName("com.zigythebird.playeranim.accessors.IAvatarAnimationState");
-            throw new AssertionError("PAL must actually be absent");
-        } catch (ClassNotFoundException expected) {}
-        PoseStack pose = new PoseStack();
-        pose.matrix.translate(2,3,4).rotateXYZ(.2f,-.3f,.4f).scale(2,3,4);
-        Matrix4f before = new Matrix4f(pose.matrix);
-        for (int i=0; i<3; i++) for (boolean left : new boolean[]{false,true}) {
-            PlayerAnimationCompat.applyItemTransform(null, left, pose);
-            PlayerAnimationCompat.applyItemTransform(new Object(), left, pose);
-        }
-        if (!before.equals(pose.matrix) || FiguraMod.LOGGER.warnings != 0)
-            throw new AssertionError("absent PAL changed matrix/logged");
-    }
-}
-""")
-        fake = [java(bone, """
+
+
+def fake_pal(java):
+    return [java(bone, """
 package com.zigythebird.playeranimcore.bones;
 import org.joml.Vector3f;
 public class PlayerAnimBone {
@@ -171,6 +147,75 @@ public interface IAvatarAnimationState {
     AvatarAnimManager playerAnimLib$getAnimManager();
 }
 """)]
+
+
+def main():
+    joml = joml_dependency()
+    pal = dependency("PAL_JAR", [p for root in PRISM for p in
+                     (root / "instances").glob("*/minecraft/mods/*PlayerAnimation*.jar")])
+    api = {name: run(JDK / "javap", "-classpath", pal, name)
+           for name in (accessor, entity_accessor, manager, stack, bone, combat_access, animation)}
+    assert f"public abstract {manager} playerAnimLib$getAnimManager();" in api[accessor]
+    assert f"public abstract {manager} playerAnimLib$getAnimManager();" in api[entity_accessor]
+    assert "public abstract boolean playerAnimLib$isFirstPersonPass();" in api[accessor]
+    assert (f"public static {animation} getPlayerAnimationLayer(net.minecraft.world.entity.Avatar, "
+            "net.minecraft.resources.Identifier);") in api[combat_access]
+    assert "public abstract boolean isActive();" in api[animation]
+    assert f"extends {stack}" in api[manager], "Manager inheritance changed"
+    assert "public boolean isActive();" in api[stack]
+    assert f"public void get3DTransform({bone});" in api[stack]
+    assert f"public {bone}(java.lang.String);" in api[bone]
+    for field in ("position", "rotation", "scale"):
+        assert re.search(r"public (?:final )?org\.joml\.Vector3f " + field + ";", api[bone])
+    print(f"PASS: installed PAL reflection API (including inherited methods): {pal.name}")
+
+    work = ROOT / "tests/.work"
+    work.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="held-item-", dir=work) as directory:
+        tmp = Path(directory)
+
+        def java(name, text):
+            path = tmp / "src" / (name.replace(".", "/") + ".java")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            return path
+
+        stubs = game_stubs(java)
+        absent = java("AbsentCheck", """
+import com.mojang.blaze3d.vertex.PoseStack;
+import org.figuramc.figura.compat.PlayerAnimationCompat;
+import org.figuramc.figura.FiguraMod;
+import org.joml.Matrix4f;
+public class AbsentCheck {
+    public static void main(String[] args) throws Exception {
+        try {
+            Class.forName("com.zigythebird.playeranim.accessors.IAvatarAnimationState");
+            throw new AssertionError("PAL must actually be absent");
+        } catch (ClassNotFoundException expected) {}
+        for (int i=0; i<3; i++) {
+            if (PlayerAnimationCompat.isAnimatingEntity(null) ||
+                PlayerAnimationCompat.isAnimatingEntity(new Object()))
+                throw new AssertionError("absent PAL detected animation");
+            if (PlayerAnimationCompat.isAttackingEntity(new net.minecraft.world.entity.Avatar()) ||
+                PlayerAnimationCompat.isAttackingEntity(null) ||
+                PlayerAnimationCompat.isAttackingEntity(new Object()) ||
+                PlayerAnimationCompat.isFirstPersonPass(null) ||
+                PlayerAnimationCompat.isFirstPersonPass(new Object()))
+                throw new AssertionError("absent PAL detected attack/first-person pass");
+        }
+        PoseStack pose = new PoseStack();
+        pose.matrix.translate(2,3,4).rotateXYZ(.2f,-.3f,.4f).scale(2,3,4);
+        Matrix4f before = new Matrix4f(pose.matrix);
+        for (int i=0; i<3; i++) for (boolean left : new boolean[]{false,true}) {
+            PlayerAnimationCompat.applyItemTransform(null, left, pose);
+            PlayerAnimationCompat.applyItemTransform(new Object(), left, pose);
+        }
+        if (!before.equals(pose.matrix) || FiguraMod.LOGGER.warnings != 0)
+            throw new AssertionError("absent PAL changed matrix/logged");
+    }
+}
+""")
+        fake = fake_pal(java)
         check = java("HeldItemCheck", """
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.zigythebird.playeranim.accessors.IAvatarAnimationState;
@@ -182,14 +227,14 @@ public class HeldItemCheck {
     public static class State implements IAvatarAnimationState {
         public AvatarAnimManager manager = new AvatarAnimManager();
         public int calls;
-        public boolean fail;
+        public boolean fail, firstPerson;
         public AvatarAnimManager playerAnimLib$getAnimManager() {
             calls++;
             if (fail) throw new IllegalStateException("manager failure");
             return manager;
         }
-        public boolean playerAnimLib$isFirstPersonPass() { return false; }
-        public void playerAnimLib$setFirstPersonPass(boolean value) {}
+        public boolean playerAnimLib$isFirstPersonPass() { return firstPerson; }
+        public void playerAnimLib$setFirstPersonPass(boolean value) { firstPerson = value; }
         public void playerAnimLib$setAnimManager(AvatarAnimManager value) { manager = value; }
     }
     static void require(boolean value, String message) {
@@ -226,6 +271,19 @@ public class HeldItemCheck {
     }
     public static void main(String[] args) {
         State state = new State(); AvatarAnimManager m = state.manager;
+        require(!PlayerAnimationCompat.isFirstPersonPass(null), "null first-person pass");
+        require(!PlayerAnimationCompat.isFirstPersonPass(new Object()), "non-PAL first-person pass");
+        for (boolean firstPerson : new boolean[]{false, true, false}) {
+            state.playerAnimLib$setFirstPersonPass(firstPerson);
+            require(PlayerAnimationCompat.isFirstPersonPass(state) == firstPerson,
+                "first-person flag must follow render state");
+        }
+        require(state.calls == 0, "first-person detection queried animation manager");
+        require(!PlayerAnimationCompat.isAttackingEntity(new net.minecraft.world.entity.Avatar()),
+            "missing optional combat API detected attack");
+        // Render-state PAL can remain usable when the optional entity accessor is absent.
+        require(!PlayerAnimationCompat.isAnimatingEntity(state), "render state is not an entity");
+        require(!PlayerAnimationCompat.isAnimatingEntity(null), "null entity animating");
         for (boolean left : new boolean[]{false,true}) {
             unchanged(null,left); unchanged(new Object(),left);
             state.manager=null; unchanged(state,left); state.manager=m;
@@ -283,21 +341,108 @@ public class HeldItemCheck {
     }
 }
 """)
+        combat = [java(entity_accessor, """
+package com.zigythebird.playeranim.accessors;
+import com.zigythebird.playeranim.animation.AvatarAnimManager;
+public interface IAnimatedAvatar {
+    AvatarAnimManager playerAnimLib$getAnimManager();
+}
+"""), java(animation, """
+package com.zigythebird.playeranimcore.animation.layered;
+import com.zigythebird.playeranimcore.bones.PlayerAnimBone;
+public interface IAnimation {
+    boolean isActive();
+    void get3DTransform(PlayerAnimBone bone);
+}
+"""), java(combat_access, """
+package com.zigythebird.playeranim.api;
+import net.minecraft.world.entity.Avatar;
+import net.minecraft.resources.Identifier;
+import com.zigythebird.playeranimcore.animation.layered.IAnimation;
+import java.util.*;
+public class PlayerAnimationAccess {
+    public static final Map<Avatar, IAnimation> attacks = new IdentityHashMap<>();
+    public static int calls;
+    public static IAnimation getPlayerAnimationLayer(Avatar entity, Identifier id) {
+        calls++;
+        if (!id.equals(Identifier.fromNamespaceAndPath("bettercombat", "attack")))
+            throw new AssertionError("wrong attack layer identifier: " + id);
+        return attacks.get(entity);
+    }
+}
+""")]
+        combat_check = java("CombatCheck", """
+import net.minecraft.world.entity.Avatar;
+import com.zigythebird.playeranim.api.PlayerAnimationAccess;
+import com.zigythebird.playeranimcore.animation.layered.IAnimation;
+import com.zigythebird.playeranimcore.bones.PlayerAnimBone;
+import org.figuramc.figura.compat.PlayerAnimationCompat;
+import org.figuramc.figura.FiguraMod;
+public class CombatCheck {
+    public static class AnimatedEntity extends Avatar implements
+            com.zigythebird.playeranim.accessors.IAnimatedAvatar {
+        public final com.zigythebird.playeranim.animation.AvatarAnimManager manager =
+            new com.zigythebird.playeranim.animation.AvatarAnimManager();
+        public com.zigythebird.playeranim.animation.AvatarAnimManager playerAnimLib$getAnimManager() {
+            return manager;
+        }
+    }
+    public static class Attack implements IAnimation {
+        public boolean active;
+        public boolean isActive() { return active; }
+        public void get3DTransform(PlayerAnimBone bone) {
+            throw new AssertionError("combat detector evaluated bones");
+        }
+    }
+    static void require(boolean value, String message) {
+        if (!value) throw new AssertionError(message);
+    }
+    public static void main(String[] args) {
+        AnimatedEntity entity = new AnimatedEntity();
+        require(!PlayerAnimationCompat.isAttackingEntity(null), "null attacking");
+        require(!PlayerAnimationCompat.isAttackingEntity(new Object()), "non-avatar attacking");
+        require(PlayerAnimationAccess.calls == 0, "invalid entity queried attack API");
+        require(!PlayerAnimationCompat.isAttackingEntity(entity), "missing layer attacking");
+        Attack attack = new Attack();
+        PlayerAnimationAccess.attacks.put(entity, attack);
+        // An active general animation/weapon pose must not substitute for the attack layer.
+        require(PlayerAnimationCompat.isAnimatingEntity(entity), "weapon pose fixture inactive");
+        for (boolean active : new boolean[]{false, true, false}) {
+            attack.active = active;
+            require(PlayerAnimationCompat.isAttackingEntity(entity) == active,
+                "attack layer activity not respected: " + active);
+            require(!PlayerAnimationCompat.isAttackingEntity(new Avatar()), "attack leaked to another avatar");
+        }
+        entity.manager.active = false;
+        require(!PlayerAnimationCompat.isAnimatingEntity(entity), "idle fixture active");
+        require(!PlayerAnimationCompat.isAttackingEntity(entity), "idle entity attacking");
+        PlayerAnimationAccess.attacks.remove(entity);
+        require(!PlayerAnimationCompat.isAttackingEntity(entity), "removed attack layer cached");
+        require(FiguraMod.LOGGER.warnings == 0, "healthy combat detection warned");
+    }
+}
+""")
         classes, pal_classes = tmp / "classes", tmp / "fake-pal"
         source = ROOT / "common/src/main/java/org/figuramc/figura/compat/PlayerAnimationCompat.java"
         run(JDK / "javac", "--release", "25", "-cp", joml, "-d", classes, *stubs, source, absent)
         run(JDK / "javac", "--release", "25", "-cp", os.pathsep.join(map(str, (classes, joml))),
             "-d", pal_classes, *fake, check)
+        combat_classes = tmp / "fake-combat"
+        run(JDK / "javac", "--release", "25", "-cp", os.pathsep.join(map(str, (classes, joml, pal_classes))),
+            "-d", combat_classes, *combat, combat_check)
         base_cp = os.pathsep.join(map(str, (classes, joml)))
         run(JDK / "java", "-cp", base_cp, "AbsentCheck")
         present_cp = os.pathsep.join((base_cp, str(pal_classes)))
         run(JDK / "java", "-cp", present_cp, "HeldItemCheck", "matrix")
+        run(JDK / "java", "-cp", os.pathsep.join((present_cp, str(combat_classes))), "CombatCheck")
         for failure in ("manager", "active", "transform", "linkage"):
             for left in ("false", "true"):
                 run(JDK / "java", "-cp", present_cp, "HeldItemCheck", failure, left)
     print("PASS: full production bridge; absent/null/non-PAL/inactive; both hands, each axis, "
           "combined/identity/scale, repeated and accumulated transforms; no scratch leakage; "
           "manager/getter/transform/linkage failures log once and disable without partial matrices")
+    print("PASS: optional combat API absent/present; attack active/idle/missing/removed layer; "
+          "first-person false/true/false/null/non-PAL")
     print("Limits: matrix-only game stubs; installed PAL API checked, not animation evaluation or rendering.")
 
 

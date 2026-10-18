@@ -10,6 +10,7 @@ import org.figuramc.figura.lua.api.HostAPI;
 import org.figuramc.figura.lua.api.RendererAPI;
 import org.figuramc.figura.lua.api.TextureAPI;
 import org.figuramc.figura.lua.api.action_wheel.ActionWheelAPI;
+import org.figuramc.figura.lua.api.action_wheel.Action;
 import org.figuramc.figura.lua.api.entity.EntityAPI;
 import org.figuramc.figura.lua.api.entity.NullEntity;
 import org.figuramc.figura.lua.api.event.EventsAPI;
@@ -95,6 +96,34 @@ public class FiguraLuaRuntime {
         LuaTable figuraMetatables = new LuaTable();
         typeManager.dumpMetatables(figuraMetatables);
         setGlobal("figuraMetatables", figuraMetatables);
+    }
+
+    private final java.util.IdentityHashMap<LuaFunction, Action> actionToggles = new java.util.IdentityHashMap<>();
+
+    public void registerActionToggle(Action action, LuaFunction previous, LuaFunction next) {
+        if (previous != null && actionToggles.get(previous) == action)
+            actionToggles.remove(previous);
+        if (next != null) {
+            // A shared callback cannot identify which toggle is initializing; do not guess.
+            if (actionToggles.containsKey(next) && actionToggles.get(next) != action)
+                actionToggles.put(next, null);
+            else
+                actionToggles.put(next, action);
+        }
+    }
+
+    public Action findInitializingToggle() {
+        if (actionToggles.isEmpty())
+            return null;
+        // Inspect the existing Lua call stack, without invoking or replaying avatar callbacks.
+        for (int level = 1; ; level++) {
+            LuaValue info = getInfoFunction.call(LuaValue.valueOf(level), LuaValue.valueOf("f"));
+            if (info.isnil())
+                return null;
+            LuaValue function = info.get("func");
+            if (function instanceof LuaFunction f && actionToggles.containsKey(f))
+                return actionToggles.get(f);
+        }
     }
 
     public void registerClass(Class<?> clazz) {

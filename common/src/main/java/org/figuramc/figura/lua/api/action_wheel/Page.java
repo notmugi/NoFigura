@@ -20,6 +20,7 @@ import java.util.Map;
 public class Page {
 
     private final String title;
+    private final org.figuramc.figura.avatar.Avatar owner;
 
     private final HashMap<Integer, Action> actionsMap = new HashMap<>();
 
@@ -29,7 +30,8 @@ public class Page {
     @LuaFieldDoc("wheel_page.keep_slots")
     public boolean keepSlots = false;
 
-    public Page(String title) {
+    public Page(String title, org.figuramc.figura.avatar.Avatar owner) {
+        this.owner = owner;
         this.title = title;
     }
 
@@ -123,7 +125,7 @@ public class Page {
     )
     public Action newAction(Integer index) {
         // set the action
-        Action action = new Action();
+        Action action = new Action(owner);
         this.actionsMap.put(checkIndex(index), action);
 
         // return the action

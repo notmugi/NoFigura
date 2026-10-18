@@ -13,6 +13,7 @@ import org.figuramc.figura.avatar.local.LocalAvatarFetcher;
 import org.figuramc.figura.avatar.local.LocalAvatarLoader;
 import org.figuramc.figura.backend2.NetworkStuff;
 import org.figuramc.figura.compat.GeckoLibCompat;
+import org.figuramc.figura.compat.EmfCompat;
 import org.figuramc.figura.compat.IrisCompat;
 import org.figuramc.figura.compat.SimpleVCCompat;
 import org.figuramc.figura.config.Configs;
@@ -69,6 +70,7 @@ public class FiguraMod {
         FiguraRuntimeResources.init();
         DebugScreenEntriesAccessor.figura$invokeRegister(FIGURA_DEBUG_KEY, new DebugEntryFigura());
 
+        EmfCompat.init();
         GeckoLibCompat.init();
         SimpleVCCompat.init();
         if (PlatformUtils.isModLoaded("iris")) {

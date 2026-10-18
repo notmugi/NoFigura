@@ -116,7 +116,7 @@ class Configs {
 }
 class FiguraMod { static void popPushProfiler(String ignored) {} }
 class Avatar {
-    boolean isHost;
+    boolean isHost, combatPose, combatFirstPerson;
     Object render;
     enum Mode { RENDER }
     Mode renderMode = Mode.RENDER;
@@ -170,8 +170,8 @@ class Renderer {
         visits++;
         VanillaPoseCheck.require((part.customization != live) == expectedFollow, "scope selection");
         if (expectedFollow) {
-            VanillaPoseCheck.pose(part.customization, live);
-            VanillaPoseCheck.require(part.parentType == ParentType.Head && part.animationOverride == 7,
+            VanillaPoseCheck.pose(part.customization, live, avatar.combatPose);
+            VanillaPoseCheck.require(part.parentType == ParentType.Head && part.animationOverride == (avatar.combatPose ? 0 : 7),
                                      "temporary parent / animation override");
             // Emulate vanilla rendering overwriting its scratch customization.
             part.playerCustomization = new PartCustomization();
@@ -215,8 +215,18 @@ public class VanillaPoseCheck {
         require(p.uvMatrix.marker == 42 && p.partType == PartType.MESH, "UV / geometry type");
     }
     static void pose(PartCustomization p, PartCustomization live) {
+        pose(p, live, false);
+    }
+    static void pose(PartCustomization p, PartCustomization live, boolean combat) {
         transforms(p, 2);
-        equal(p.getAnimPos(), 3); equal(p.getAnimRot(), 6); equal(p.getAnimScale(), 9);
+        if (combat) {
+            for (FiguraVec3 channel : List.of(p.getAnimPos(), p.getAnimRot()))
+                require(channel.x == 0 && channel.y == 0 && channel.z == 0, "combat animation translation/rotation");
+            FiguraVec3 scale = p.getAnimScale();
+            require(scale.x == 1 && scale.y == 1 && scale.z == 1, "combat animation scale");
+        } else {
+            equal(p.getAnimPos(), 3); equal(p.getAnimRot(), 6); equal(p.getAnimScale(), 9);
+        }
         appearance(p, live);
         require(p.needsMatrixRecalculation, "stale transform matrix");
     }
@@ -261,13 +271,16 @@ public class VanillaPoseCheck {
         for (boolean separate : List.of(false, true))
         for (boolean matrices : List.of(false, true))
         for (boolean fail : List.of(false, true))
-        for (boolean savedPlayer : List.of(false, true)) {
+        for (boolean savedPlayer : List.of(false, true))
+        // Re-enter ordinary rendering after combat using the same live state.
+        for (boolean combat : List.of(false, true, false)) {
             renderer.avatar.isHost = host;
+            renderer.avatar.combatPose = combat;
             Configs.FOLLOW_VANILLA_POSE.value = enabled;
             require(renderer.avatar.followsVanillaPose() == (host && enabled), "host/config gate");
             renderer.currentFilterScheme.parentType = separate ? ParentType.World : ParentType.None;
             part.vanillaPosePart = bodyRig;
-            renderer.expectedFollow = host && enabled && !separate && bodyRig;
+            renderer.expectedFollow = ((host && enabled) || combat) && !separate && bodyRig;
             renderer.fail = fail;
             renderer.avatar.calls.clear();
             PartCustomization player = savedPlayer ? new PartCustomization() : null;
@@ -305,7 +318,8 @@ public class VanillaPoseCheck {
             renderer.checkSeparateParent(part);
         }
         System.out.println("PASS: bind transforms, appearance, animation passthrough, live-state isolation; " +
-            "both scopes restore on success/exception; host/toggle/separate bypass; pre/mid/post callback gates");
+            "combat neutralizes override/channels with toggle ON/OFF; both scopes restore on success/exception; " +
+            "host/toggle/separate bypass; accessory pre/mid/post callback gates");
     }
 }
 """

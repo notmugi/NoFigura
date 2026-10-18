@@ -2,7 +2,7 @@
 """python3 tests/check_wheel_animations.py (JDK 25; JAVA25_HOME overrides default).
 
 Compile extracted Avatar wheel/ping/queue/run methods, Action callbacks, Animation
-play/stop/pause/restart/gate/tick methods, full AnimationPlayer/TransformType,
+play/stop/pause/restart/setPlaying/gate/tick methods, full AnimationPlayer/TransformType,
 STEP interpolation and model animation setters. Dependencies are small stubs.
 Limits: no Lua interpreter, network transport/PingFunction.invoke serialization,
 real clock, non-STEP interpolation, renderer or host/config policy. Echo tests call
@@ -47,9 +47,11 @@ def main():
     interpolation = (SOURCE / "animation/Interpolation.java").read_text()
     part = (SOURCE / "model/FiguraModelPart.java").read_text()
     animation_methods = "\n".join(block(animation, signature) for signature in (
+        r"private void captureToggleOwner\(\)",
         r"public boolean allowsBodyPose\(\)",
         r"public Animation play\(\)", r"public Animation stop\(\)",
         r"public Animation pause\(\)", r"public Animation restart\(\)",
+        r"public Animation setPlaying\(boolean bool\)",
         r"public Animation\(Avatar owner,[^\n]+\)",
         r"public void addAnimation\(FiguraModelPart part, AnimationChannel anim\)",
         r"public void tick\(\)",
@@ -72,18 +74,21 @@ def main():
     ))
     avatar_methods = "\n".join(block(avatar, signature) for signature in (
         r"public void runActionWheel\(Runnable callback\)",
-        r"private record WheelPing\(int id, byte\[\] data\)",
+        r"public void runActionWheel\(org\.figuramc\.figura\.lua\.api\.action_wheel\.Action toggle, Runnable callback\)",
+        r"private record WheelPing\(int id, byte\[\] data, org\.figuramc\.figura\.lua\.api\.action_wheel\.Action toggle\)",
         r"public synchronized void markActionWheelPing\(int id, byte\[\] data\)",
-        r"private synchronized boolean consumeActionWheelPing\(int id, byte\[\] data\)",
+        r"private synchronized WheelPing consumeActionWheelPing\(int id, byte\[\] data\)",
         r"public void runPing\(int id, byte\[\] data\)",
         r"private void flushQueuedEvents\(\)",
         r"public void tickEvent\(\)",
         r"public Varargs run\(Object toRun, Instructions limit, Object\.\.\. args\)",
     ))
     action_methods = "\n".join(block(action, signature) for signature in (
+        r"public Action\(Avatar owner\)",
         r"public void execute\(Avatar avatar, boolean left\)",
         r"private void executeCallback\(Avatar avatar, boolean left\)",
         r"public void mouseScroll\(Avatar avatar, double delta\)",
+        r"public boolean isToggled\(\)",
     ))
     sources = {
         "Avatar.java": """
@@ -91,6 +96,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 class Avatar {
     boolean follow = true, actionWheelCallback, scriptError, loaded = true;
+    Action actionWheelToggle;
     final Queue<Runnable> events = new ConcurrentLinkedQueue<>();
     final ArrayDeque<WheelPing> wheelPings = new ArrayDeque<>();
     RuntimeStub luaRuntime = new RuntimeStub();
@@ -99,6 +105,7 @@ class Avatar {
 """ + avatar_methods + "\n}",
         "Action.java": """
 class Action {
+    private final Avatar owner;
     boolean toggled;
     LuaFunction leftClick, rightClick, toggle, untoggle, scroll;
 """ + action_methods + "\n}",
@@ -124,6 +131,7 @@ public class Animation {
     int override, priority, codeCalls;
     LoopMode loop;
     boolean actionWheelPlayback;
+    Action actionWheelToggle;
     void playCode(float from, float to) { codeCalls++; }
 """ + animation_methods + "\n}",
         "WheelAnimationsCheck.java": """
@@ -146,6 +154,8 @@ class Pings {
     PingFunction get(String name) { return functions.get(Integer.parseInt(name)); }
 }
 class RuntimeStub {
+    // Real Lua stack attribution is covered by check_toggle_init.py.
+    Action findInitializingToggle() { return null; }
     final Pings ping = new Pings();
     int errors;
     LuaFunction tickCallback;
@@ -278,7 +288,7 @@ public class WheelAnimationsCheck {
             Animation clip = animation(owner, name);
             ordinary(owner, clip::play);
             denied(clip, "ordinary tick start: " + name);
-            Action action = new Action();
+            Action action = new Action(owner);
             action.leftClick = args -> clip.play();
             action.execute(owner, true);
             allowed(clip, "direct radial click (including already playing): " + name);
@@ -295,10 +305,10 @@ public class WheelAnimationsCheck {
                 require(clip.allowsBodyPose() == (blend != 0), "blend gate " + blend);
             }
             clip.blend=1;
-            clip.stop(); denied(clip, "stop clears wheel provenance");
-            ordinary(owner, clip::play); denied(clip, "ordinary restart after stop");
+            clip.stop(); denied(clip, "stop clears button playback provenance");
+            ordinary(owner, clip::play); denied(clip, "ordinary start after button stop stays denied");
             owner.runActionWheel(clip::restart); allowed(clip, "wheel restart");
-            ordinary(owner, clip::restart); denied(clip, "ordinary restart clears provenance");
+            ordinary(owner, clip::restart); denied(clip, "ordinary restart clears button playback provenance");
             owner.follow=false; clip.blend=0; allowed(clip, "follow disabled bypass");
         }
         // Exercise actual Action.execute selection, toggle arguments and fallback.
@@ -312,7 +322,7 @@ public class WheelAnimationsCheck {
                 require(owner.actionWheelCallback, "callback must be in wheel scope");
                 if (queued) owner.runPing(1, new byte[]{42}); else clip.play();
             };
-            Action action = new Action();
+            Action action = new Action(owner);
             action.leftClick = args -> { callbacks.add("left"); clicks[0]++; start.run(); };
             action.rightClick = args -> { callbacks.add("right"); clicks[0]++; start.run(); };
             action.toggle = args -> { callbacks.add("toggle"); toggles[0]++; require((boolean)args[0] == action.toggled, "toggle argument"); start.run(); };
@@ -321,12 +331,12 @@ public class WheelAnimationsCheck {
             require(action.toggled && clicks[0]==1 && toggles[0]==1, "left toggles on");
             clip.stop(); action.execute(owner,false); drain(owner); allowed(clip, "right click start");
             require(action.toggled && clicks[0]==2 && toggles[0]==1, "right must not toggle");
-            clip.stop(); action.execute(owner,true); drain(owner); allowed(clip, "untoggle start");
+            clip.stop(); action.execute(owner,true); drain(owner); denied(clip, "untoggle denies even when callback plays");
             require(!action.toggled && toggles[0]==2, "untoggle callback");
             action.leftClick=null;
             clip.stop(); action.execute(owner,true); drain(owner); allowed(clip, "toggle-only start");
             action.untoggle=null;
-            clip.stop(); action.execute(owner,true); drain(owner); allowed(clip, "toggle fallback on untoggle");
+            clip.stop(); action.execute(owner,true); drain(owner); denied(clip, "toggle fallback off denies even when callback plays");
             require(!action.toggled && toggles[0]==4, "fallback toggles off");
             require(callbacks.equals(List.of("left","toggle","right","left","untoggle","toggle","toggle")),
                     "correct click/toggle callback selection and order");
@@ -335,6 +345,145 @@ public class WheelAnimationsCheck {
             require(!owner.actionWheelCallback, "callback/ping scope leaked");
             clip.stop(); ordinary(owner,clip::play); denied(clip, "next ordinary tick denied");
         }
+    }
+    static void rainyToggle() {
+        // The menu enables an umbrella while dry; only a later ordinary tick plays it.
+        // Run both local queued dispatch and sync echo marker/consume dispatch.
+        for (boolean sync : List.of(false, true)) {
+            Avatar owner = new Avatar();
+            Animation umbrella = animation(owner, "umbrella"), walk = animation(owner, "walk");
+            FiguraModelPart body = new FiguraModelPart("umbrella body", true);
+            channels(umbrella, body);
+            Action menu = new Action(owner);
+            boolean[] rain = {false}, enabled = {false};
+            int[] calls = {0};
+            Runnable weather = () -> umbrella.setPlaying(enabled[0] && rain[0]);
+            owner.luaRuntime.ping.functions.put(10, new PingFunction(args -> {
+                require(owner.actionWheelToggle == menu, "ping carries exact owning Action: sync=" + sync);
+                enabled[0] = ((LuaValue)args[0]).value != 0;
+                calls[0]++;
+                weather.run();
+            }));
+            menu.toggle = args -> {
+                require(owner.actionWheelToggle == menu, "toggle callback owns scope");
+                if (!(boolean)args[0]) {
+                    require(umbrella.playState == Animation.PlayState.PLAYING, "toggle off precedes queued stop");
+                    denied(umbrella, "live Action state blocks stale playback before off ping dispatch");
+                    tick(umbrella, 0); neutral(body);
+                }
+                byte[] data = {(byte)((boolean)args[0] ? 1 : 0)};
+                if (sync) owner.markActionWheelPing(10, data); else owner.runPing(10, data);
+            };
+            menu.execute(owner, true);
+            // Avatar.run flushes local queued pings before returning; sync waits for its echo.
+            require(menu.isToggled() && calls[0] == (sync ? 0 : 1), "dry menu ping dispatch timing");
+            require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "menu scope reset");
+            if (sync) owner.runPing(10, new byte[]{1});
+            drain(owner);
+            require(calls[0] == 1 && umbrella.playState == Animation.PlayState.STOPPED,
+                    "dry ping invokes setPlaying(false)");
+            require(umbrella.actionWheelToggle == menu, "false playback still associates toggle");
+            ordinary(owner, () -> { rain[0] = true; weather.run(); walk.setPlaying(true); });
+            allowed(umbrella, "rain begins in ordinary tick after dry toggle");
+            denied(walk, "toggle ownership does not admit unrelated locomotion");
+            tick(umbrella, 3); contribution(body, 1, 5, 7); AnimationPlayer.clear(umbrella);
+            ordinary(owner, () -> { rain[0] = false; weather.run(); });
+            require(umbrella.playState == Animation.PlayState.STOPPED, "dry weather stops umbrella");
+            allowed(umbrella, "stop retains enabled toggle ownership, unlike button playback");
+            tick(umbrella, 0); neutral(body);
+            ordinary(owner, () -> { rain[0] = true; weather.run(); });
+            allowed(umbrella, "re-rain ordinary start retains toggle ownership");
+            ordinary(owner, umbrella::restart);
+            allowed(umbrella, "ordinary restart retains enabled toggle ownership");
+            menu.execute(owner, true);
+            require(!menu.isToggled(), "menu toggled off");
+            denied(umbrella, "toggle off denies before sync echo arrives");
+            if (sync) owner.runPing(10, new byte[]{0});
+            drain(owner);
+            require(calls[0] == 2 && umbrella.playState == Animation.PlayState.STOPPED, "off ping stops");
+            ordinary(owner, () -> umbrella.setPlaying(true));
+            denied(umbrella, "stale ordinary setPlaying(true) cannot override toggle off");
+            ordinary(owner, umbrella::restart);
+            denied(umbrella, "stale restart cannot override toggle off");
+            tick(umbrella, 0); neutral(body);
+
+            // A real button can explicitly take over this clip, but not permanently.
+            Action button = new Action(owner);
+            button.leftClick = args -> umbrella.play();
+            button.execute(owner, true);
+            allowed(umbrella, "button takes over former toggle-owned clip");
+            require(umbrella.actionWheelToggle == null, "button clears previous toggle association");
+            umbrella.stop(); ordinary(owner, umbrella::play);
+            denied(umbrella, "button ownership is revoked by stop, not a permanent bypass");
+            button.execute(owner, true); ordinary(owner, umbrella::restart);
+            denied(umbrella, "button ownership is revoked by ordinary restart");
+            require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "weather scopes reset");
+        }
+    }
+    static void toggleScopesAndEchoReference() {
+        Avatar owner = new Avatar();
+        Action outer = new Action(owner), inner = new Action(owner);
+        owner.runActionWheel(outer, () -> {
+            require(owner.actionWheelCallback && owner.actionWheelToggle == outer, "outer toggle scope");
+            owner.runActionWheel(() -> require(owner.actionWheelToggle == outer, "unary scope inherits toggle"));
+            owner.runActionWheel(inner, () -> require(owner.actionWheelToggle == inner, "nested toggle scope"));
+            require(owner.actionWheelToggle == outer, "nested toggle restores outer");
+            try {
+                owner.runActionWheel(inner, () -> { throw new IllegalStateException("expected"); });
+                throw new AssertionError("nested callback should throw");
+            } catch (IllegalStateException expected) {}
+            require(owner.actionWheelCallback && owner.actionWheelToggle == outer, "nested exception restores both fields");
+            inner.leftClick = args -> require(owner.actionWheelToggle == null, "nested button is not toggle-owned");
+            inner.toggle = args -> {
+                require(owner.actionWheelToggle == inner, "nested Action toggle owns callback");
+                throw new IllegalStateException("expected");
+            };
+            try { inner.execute(owner, true); throw new AssertionError("toggle should throw"); }
+            catch (IllegalStateException expected) {}
+            require(owner.actionWheelCallback && owner.actionWheelToggle == outer, "Action exception restores outer toggle");
+        });
+        require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "outer toggle scope reset");
+        try {
+            owner.runActionWheel(outer, () -> { throw new IllegalStateException("expected"); });
+            throw new AssertionError("outer callback should throw");
+        } catch (IllegalStateException expected) {}
+        require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "outer exception resets both fields");
+
+        // Dispatch outside the originating scope, including a nested queued ping and failure.
+        Animation queued = animation(owner, "queued umbrella");
+        owner.luaRuntime.ping.functions.put(12, new PingFunction(args -> {
+            require(owner.actionWheelCallback && owner.actionWheelToggle == outer, "deferred local toggle scope");
+            owner.runPing(13, new byte[]{1});
+        }));
+        owner.luaRuntime.ping.functions.put(13, new PingFunction(args -> {
+            require(owner.actionWheelToggle == outer, "nested queued ping inherits owning Action");
+            queued.setPlaying(false);
+            throw new IllegalStateException("expected");
+        }));
+        owner.runActionWheel(outer, () -> owner.runPing(12, new byte[]{1}));
+        require(queued.actionWheelToggle == null, "local ping deferred beyond toggle scope");
+        drain(owner);
+        require(queued.actionWheelToggle == outer && owner.luaRuntime.errors == 1, "queued false association before error");
+        require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "throwing queued toggle resets both fields");
+
+        // A delayed sync echo remembers the Action object, not its old toggled value.
+        Animation clip = animation(owner, "echo umbrella");
+        outer.toggle = args -> owner.markActionWheelPing(11, new byte[]{1});
+        outer.execute(owner, true);
+        owner.luaRuntime.ping.functions.put(11, new PingFunction(args -> {
+            require(owner.actionWheelToggle == outer, "sync marker preserves exact Action reference");
+            clip.setPlaying(false);
+        }));
+        outer.toggle = args -> {};
+        outer.execute(owner, true); // off between marking and receiving the echo
+        owner.runPing(11, new byte[]{1});
+        drain(owner);
+        require(clip.actionWheelToggle == outer, "false echo associates original Action");
+        ordinary(owner, clip::play); denied(clip, "echo does not snapshot old toggle-on state");
+        outer.execute(owner, true); // no playback callback: reference alone changes permission
+        allowed(clip, "same Action re-enabled after echo association");
+        outer.execute(owner, true); denied(clip, "same Action disabled after echo association");
+        require(!owner.actionWheelCallback && owner.actionWheelToggle == null, "echo toggle scope reset");
     }
     static void scopesAndQueuedPings() {
         Avatar owner = new Avatar();
@@ -348,7 +497,7 @@ public class WheelAnimationsCheck {
             require(owner.actionWheelCallback, "nested exception restored outer");
         });
         require(!owner.actionWheelCallback, "outer scope reset");
-        Action action = new Action();
+        Action action = new Action(owner);
         action.rightClick=args -> { throw new IllegalStateException("expected"); };
         try { action.execute(owner,false); throw new AssertionError("callback should throw"); }
         catch (IllegalStateException expected) {}
@@ -450,9 +599,11 @@ public class WheelAnimationsCheck {
         AnimationPlayer.clear(action); neutral(body);
     }
     public static void main(String[] args) {
-        gatesAndCallbacks(); scopesAndQueuedPings(); echoes(); playerFiltering();
+        gatesAndCallbacks(); rainyToggle(); toggleScopesAndEchoReference();
+        scopesAndQueuedPings(); echoes(); playerFiltering();
         System.out.println("PASS: extracted wheel/Action callbacks, local queued pings, one-shot id+payload echoes; " +
-                "nesting/exception reset; play/stop/restart/pause/HOLD/blend/no-name gate; " +
+                "dry/rain toggle ownership, live echo Action references, nesting/exception reset; " +
+                "play/stop/restart/pause/HOLD/blend/no-name gate; " +
                 "AnimationPlayer body filtering, accessories, clocks, overrides, priority and clear");
     }
 }
@@ -465,7 +616,8 @@ public class WheelAnimationsCheck {
         for name, source in sources.items():
             path = Path(directory) / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(source)
+            # Extracted fully-qualified production Action references use our stub.
+            path.write_text(source.replace("org.figuramc.figura.lua.api.action_wheel.Action", "Action"))
             paths.append(str(path))
         subprocess.run([str(JDK / "javac"), "--release", "25", "-d", directory, *paths], check=True)
         subprocess.run([str(JDK / "java"), "-cp", directory, "WheelAnimationsCheck"], check=True)

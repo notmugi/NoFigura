@@ -38,9 +38,19 @@ public class Animation {
     private final TimeController controller = new TimeController();
     public PlayState playState = PlayState.STOPPED;
     private boolean actionWheelPlayback;
+    private org.figuramc.figura.lua.api.action_wheel.Action actionWheelToggle;
+
+    private void captureToggleOwner() {
+        var toggle = owner.actionWheelToggle;
+        if (toggle == null && owner.luaRuntime != null)
+            toggle = owner.luaRuntime.findInitializingToggle();
+        if (toggle != null)
+            actionWheelToggle = toggle;
+    }
 
     public boolean allowsBodyPose() {
-        return !owner.followsVanillaPose() || (actionWheelPlayback && blend != 0);
+        return !owner.followsVanillaPose() || (blend != 0 &&
+                (actionWheelToggle != null ? actionWheelToggle.isToggled() : actionWheelPlayback));
     }
     private float time = 0f;
     private boolean inverted = false;
@@ -208,8 +218,11 @@ public class Animation {
     @LuaWhitelist
     @LuaMethodDoc("animation.play")
     public Animation play() {
-        if (owner.actionWheelCallback)
+        captureToggleOwner();
+        if (owner.actionWheelCallback) {
             actionWheelPlayback = true;
+            actionWheelToggle = owner.actionWheelToggle;
+        }
         switch (playState) {
             case PAUSED -> controller.resume();
             case STOPPED -> {
@@ -236,6 +249,8 @@ public class Animation {
     @LuaWhitelist
     @LuaMethodDoc("animation.stop")
     public Animation stop() {
+        // Includes direct saved-state initialization and Lua blend-library stop wrappers.
+        captureToggleOwner();
         actionWheelPlayback = false;
         controller.reset();
         playState = PlayState.STOPPED;
@@ -263,6 +278,9 @@ public class Animation {
             value = "animation.set_playing"
     )
     public Animation setPlaying(boolean bool) {
+        // A conditional toggle may touch this clip while false (e.g. no rain yet).
+        // Remember the controlling toggle, not just this particular playback.
+        captureToggleOwner();
         return bool ? play() : stop();
     }
 

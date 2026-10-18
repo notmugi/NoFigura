@@ -22,6 +22,17 @@ import org.luaj.vm2.LuaFunction;
 )
 public class Action {
 
+    private final Avatar owner;
+
+    public Action(Avatar owner) {
+        this.owner = owner;
+    }
+
+    private void registerToggle(LuaFunction previous, LuaFunction next) {
+        if (owner.luaRuntime != null)
+            owner.luaRuntime.registerActionToggle(this, previous, next);
+    }
+
     public static final FiguraVec3 HOVER_COLOR = FiguraVec3.of(1, 1, 1);
     public static final FiguraVec3 TOGGLE_COLOR = FiguraVec3.of(0, 1, 0);
 
@@ -58,7 +69,7 @@ public class Action {
 
 
     public void execute(Avatar avatar, boolean left) {
-        avatar.runActionWheel(() -> executeCallback(avatar, left));
+        avatar.runActionWheel(null, () -> executeCallback(avatar, left));
     }
 
     private void executeCallback(Avatar avatar, boolean left) {
@@ -74,7 +85,8 @@ public class Action {
         function = toggled ? untoggle == null ? toggle : untoggle : toggle;
         if (function != null) {
             toggled = !toggled;
-            avatar.run(function, avatar.tick, toggled, this);
+            LuaFunction toggleFunction = function;
+            avatar.runActionWheel(this, () -> avatar.run(toggleFunction, avatar.tick, toggled, this));
         }
     }
 
@@ -377,6 +389,7 @@ public class Action {
             value = "wheel_action.set_on_toggle"
     )
     public Action setOnToggle(LuaFunction function) {
+        registerToggle(this.toggle, function);
         this.toggle = function;
         return this;
     }
@@ -396,6 +409,7 @@ public class Action {
             value = "wheel_action.set_on_untoggle"
     )
     public Action setOnUntoggle(LuaFunction function) {
+        registerToggle(this.untoggle, function);
         this.untoggle = function;
         return this;
     }
@@ -590,8 +604,8 @@ public class Action {
         switch (key) {
             case "leftClick" -> leftClick = func;
             case "rightClick" -> rightClick = func;
-            case "toggle" -> toggle = func;
-            case "untoggle" -> untoggle = func;
+            case "toggle" -> setOnToggle(func);
+            case "untoggle" -> setOnUntoggle(func);
             case "scroll" -> scroll = func;
             default -> throw new LuaError("Cannot assign value on key \"" + key + "\"");
         }

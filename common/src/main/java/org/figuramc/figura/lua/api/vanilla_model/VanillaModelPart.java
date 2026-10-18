@@ -83,7 +83,7 @@ public class VanillaModelPart extends VanillaPart {
 
     @Override
     public void preTransform(EntityModel<?> model) {
-        if (!saved || owner.followsVanillaPose()) return;
+        if (!saved || owner.followsVanillaPose() || owner.combatPose) return;
 
         ModelPart part = getPart(model);
         if (part == null) return;
